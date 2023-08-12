@@ -4,7 +4,7 @@ import uuid
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import aiogram.utils.markdown as fmt
-from aiogram.types import InputFile, ParseMode
+from aiogram.types import InputFile, ParseMode, InputMediaPhoto
 
 import db, keyboard
 from aiogram.dispatcher import FSMContext
@@ -86,29 +86,23 @@ async def leave_application_handler(callback: types.CallbackQuery):
 async def process_location_step(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['location'] = message.text
-    await Application.Photo.set()
+    await Application.Media.set()
     await message.answer('Шаг 2/3 📷 Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:', reply_markup=keyboard.skip_m)
 
 
-@dp.message_handler(content_types=['photo', 'video'], state=Application.Photo)
+@dp.message_handler(content_types=['photo', 'video'], state=Application.Media)
 async def process_media_step(message: types.Message, state: FSMContext):
     if message.content_type not in ['photo', 'video']:
-        await message.answer('⛔📛В данном пункте нужно обязательно отправить <b>фотографию</b> или <b>видео</b> в виде медиа-сообщения. Попробуйте ещё раз:')
+        await message.answer(
+            '⛔📛В данном пункте нужно обязательно отправить <b>фотографию</b> или <b>видео</b> в виде медиа-сообщения. Попробуйте ещё раз:')
         return
-
     file_id = message.photo[-1].file_id if message.content_type == 'photo' else message.video.file_id
-    file_info = await bot.get_file(file_id)
-    file_path = file_info.file_path
-    downloaded_file = await bot.download_file(file_path)
-    file_extension = os.path.splitext(file_path)[-1]
-    unique_filename = f'{uuid.uuid4()}{file_extension}'
-    save_path = os.path.join(f'Media', unique_filename)
-
-    with open(save_path, 'wb') as f:
-        f.write(downloaded_file.read())
 
     async with state.proxy() as data:
-        data['photo'] = save_path
+        if message.content_type == 'photo':
+            data['photo'] = file_id
+        else:
+            data['video'] = file_id
 
     await Application.Reason.set()
 
@@ -122,6 +116,7 @@ async def process_reason_step(message: types.Message, state: FSMContext):
         chat_id = message.chat.id
         location = data.get('location', 'Unknown Location')
         photo = data.get('photo')
+        video = data.get('video')
         reason = data.get('reason', 'No reason provided')
         user_info = db.get_user_info(chat_id)
         name = user_info['name']
@@ -134,8 +129,9 @@ async def process_reason_step(message: types.Message, state: FSMContext):
         application_info = f"⛔Поступила новая жалобa:\n@{user_username}\n<b>Имя и фамилия: </b>{name}\n<b>Номер телефона:</b> {num}\n<b>Адрес:</b> {location}\n<b>Причина:</b> {reason}"
 
         if photo:
-            input_photo = InputFile(photo)
-            await bot.send_photo(group_chat_id, input_photo, caption=application_info, parse_mode='HTML')
+            await bot.send_photo(group_chat_id, photo, caption=application_info, parse_mode='HTML')
+        if video:
+            await bot.send_video(group_chat_id, video, caption=application_info, parse_mode='HTML')
         else:
             await bot.send_message(group_chat_id, application_info, parse_mode='HTML')
 
@@ -143,15 +139,16 @@ async def process_reason_step(message: types.Message, state: FSMContext):
         await message.answer('<b>✅Жалоба отправлена администрации.</b>' + '<i> Спасибо за Ваше обращение!</i>')
 
 
+
 @dp.callback_query_handler(lambda c: c.data == 'skip', state=Application.Location)
 async def skip_location_handler(callback: types.CallbackQuery, state: FSMContext):
     async with state.proxy() as data:
         data['location'] = None
-    await Application.Photo.set()
+    await Application.Media.set()
     await callback.message.answer('Шаг 2/3 📷 Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:', reply_markup=keyboard.skip_m)
 
 
-@dp.callback_query_handler(lambda c: c.data == 'skip', state=Application.Photo)
+@dp.callback_query_handler(lambda c: c.data == 'skip', state=Application.Media)
 async def skip_photo_handler(callback: types.CallbackQuery, state: FSMContext):
     async with state.proxy() as data:
         data['photo'] = None
@@ -167,9 +164,9 @@ async def go_back(callback: types.CallbackQuery, state: FSMContext):
             del data['photo']
         current_state = await state.get_state()
         if current_state == Application.Reason.state:
-            await Application.Photo.set()
+            await Application.Media.set()
             await callback.message.answer('Шаг 2/3 📷 Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:', reply_markup=keyboard.skip_m)
-        elif current_state == Application.Photo.state:
+        elif current_state == Application.Media.state:
             await Application.Location.set()
             await callback.message.answer('<b><i>Шаг 1/3 📝 </i></b>' + 'Напишите адрес или ориентир проблемы (улицу, номер дома, подъезд, этаж и квартиру) или пропустите этот пункт:', reply_markup=keyboard.skip_m)
         elif current_state == Application.Suggestion.state:

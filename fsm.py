@@ -8,7 +8,7 @@ class Users(StatesGroup):
 
 class Application(StatesGroup):
     Location = State()
-    Photo = State()
+    Media = State()
     Reason = State()
     Suggestion = State()
     Suggestion_ph = State()
