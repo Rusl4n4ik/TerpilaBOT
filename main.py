@@ -8,7 +8,7 @@ from aiogram.types import InputFile, ParseMode, InputMediaPhoto
 
 import db, keyboard
 from aiogram.dispatcher import FSMContext
-from fsm import Users, Application, Update
+from fsm import Users, Application, Update, Contact
 import re
 
 
@@ -93,51 +93,53 @@ async def process_location_step(message: types.Message, state: FSMContext):
 @dp.message_handler(content_types=['photo', 'video'], state=Application.Media)
 async def process_media_step(message: types.Message, state: FSMContext):
     if message.content_type not in ['photo', 'video']:
-        await message.answer(
-            '⛔📛В данном пункте нужно обязательно отправить <b>фотографию</b> или <b>видео</b> в виде медиа-сообщения. Попробуйте ещё раз:')
+        await message.answer('⛔📛В данном пункте нужно обязательно отправить <b>фотографию</b> или <b>видео</b> в виде медиа-сообщения. Попробуйте ещё раз:')
         return
+
     file_id = message.photo[-1].file_id if message.content_type == 'photo' else message.video.file_id
 
-    async with state.proxy() as data:
-        if message.content_type == 'photo':
+    if message.content_type == 'photo':
+        async with state.proxy() as data:
             data['photo'] = file_id
-        else:
+            data.pop('video', None)
+    else:
+        async with state.proxy() as data:
             data['video'] = file_id
+            data.pop('photo', None)
 
     await Application.Reason.set()
 
-    await message.answer('Шаг 3/3 📝 Напишите причину обращения:', reply_markup=keyboard.skip_m)
+    await bot.send_message(message.chat.id, 'Шаг 3/3 📝 Напишите причину обращения:', reply_markup=keyboard.skip_m)
 
 
 @dp.message_handler(state=Application.Reason)
 async def process_reason_step(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
-        data['reason'] = message.text
         chat_id = message.chat.id
         location = data.get('location', 'Unknown Location')
         photo = data.get('photo')
         video = data.get('video')
-        reason = data.get('reason', 'No reason provided')
+        reason = message.text
         user_info = db.get_user_info(chat_id)
         name = user_info['name']
         num = user_info['phnum']
         user = await bot.get_chat_member(chat_id, message.from_user.id)
         user_username = user.user.username
-        db.add_application(chat_id, location, photo, reason)
+        db.add_application(chat_id, location, photo or video, reason)
 
         group_chat_id = -1001973593367
         application_info = f"⛔Поступила новая жалобa:\n@{user_username}\n<b>Имя и фамилия: </b>{name}\n<b>Номер телефона:</b> {num}\n<b>Адрес:</b> {location}\n<b>Причина:</b> {reason}"
 
-        if photo:
-            await bot.send_photo(group_chat_id, photo, caption=application_info, parse_mode='HTML')
-        if video:
-            await bot.send_video(group_chat_id, video, caption=application_info, parse_mode='HTML')
-        else:
+        try:
+            if photo:
+                await bot.send_photo(group_chat_id, photo, caption=application_info, parse_mode='HTML')
+            if video:
+                await bot.send_video(group_chat_id, video, caption=application_info, parse_mode='HTML')
+        except:
             await bot.send_message(group_chat_id, application_info, parse_mode='HTML')
 
         await state.finish()
-        await message.answer('<b>✅Жалоба отправлена администрации.</b>' + '<i> Спасибо за Ваше обращение!</i>')
-
+        await bot.send_message(chat_id, '<b>✅Жалоба отправлена администрации.</b>' + '<i> Спасибо за Ваше обращение!</i>')
 
 
 @dp.callback_query_handler(lambda c: c.data == 'skip', state=Application.Location)
@@ -326,6 +328,89 @@ async def set_number(message: types.Message, state: FSMContext):
         db.update_user(chat_id, name=old_data.get('name'), phnum=new_number)
         await state.finish()
         await message.answer('🛠✅🛠Настройки <b>номера</b> успешно применены!')
+
+
+@dp.message_handler(text='📞Связаться')
+async def contact(message: types.Message):
+    await message.answer('👇<i>Выберите способ связи из нижеперечисленного списка:</i>', reply_markup=keyboard.call_m)
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data == 'call_back')
+async def process_callback_call_back(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    user_info = db.get_user_info(callback_query.from_user.id)
+    num = user_info['phnum']
+    await bot.send_message(callback_query.from_user.id, f'<b>Это ваш верный номер телефона</b> <u>{num}</u> Если да, нажмите соответствующую кнопку. <b>Если нет</b>, впишите свой актуальный номер телефона здесь:', reply_markup=keyboard.call_b)
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data == 'confirm_number')
+async def process_callback_confirm_number(callback_query: types.CallbackQuery, state: FSMContext):
+    await bot.answer_callback_query(callback_query.id)
+    user_info = db.get_user_info(callback_query.from_user.id)
+    num = user_info['phnum']
+    name = user_info['name']
+    await bot.send_message(callback_query.from_user.id, '<b>✅Отлично!</b> Наш диспетчер перезвонит Вам в ближайшее время.')
+    group_chat_id = -1001973593367  # Замените на ID вашей группы
+    notification = f"⚠️ Необходимо связаться с пользователем:\n<b>Имя:</b> {name}\n<b>Номер телефона:</b> {num}"
+    await bot.send_message(group_chat_id, notification, parse_mode='HTML')
+
+    # Сохраняем номер в стейте
+    async with state.proxy() as data:
+        data['phone_number'] = num
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data == 'leave-num')
+async def process_callback_leave_number(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    await Contact.Number.set()
+    await bot.send_message(callback_query.from_user.id, "Пожалуйста, введите свой номер телефона:")
+
+
+@dp.message_handler(state=Contact.Number)
+async def process_phone_number(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['phone_number'] = message.text
+
+        chat_id = message.chat.id
+        user_info = db.get_user_info(chat_id)
+        name = user_info['name']
+        phone_number = data['phone_number']
+
+        group_chat_id = -1001973593367  # Замените на ID вашей группы
+        notification = f"⚠️ Необходимо связаться с пользователем:\n<b>Имя:</b> {name}\n<b>Номер телефона:</b> {phone_number}"
+
+        await bot.send_message(group_chat_id, notification, parse_mode='HTML')
+    await message.reply("Спасибо! Ваш номер телефона сохранен и отправлен в группу.")
+    await state.finish()
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data == 'chat')
+async def process_callback_chat(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)  # Ответ на коллбек, чтобы кнопка перестала светиться
+    await bot.send_message(callback_query.from_user.id, '✔📞✔Добрый день! Я - диспетчер управляющей компании "УЭР-ЮГ", готов помочь Вам. Напишите, пожалуйста, интересующий Вас вопрос и ожидайте', reply_markup=keyboard.finish)
+    await Contact.Text.set()
+
+
+@dp.message_handler(state=Contact.Text)
+async def process_text_step(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        text = message.text
+        user_info = db.get_user_info(message.chat.id)
+        name = user_info['name']
+        num = user_info['phnum']
+        group_chat_id = -1001973593367  # Замените на ID вашей группы
+        notification = f"Пользователь @{message.from_user.username} ({name}, {num}) написал:\n{text}"
+        await bot.send_message(group_chat_id, notification, parse_mode='HTML')
+    await state.finish()
+    await message.answer('Ваше сообщение успешно отправлено группе.')
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data == 'end_dialog')
+async def end_dialog(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.finish()
+    await bot.send_message(callback_query.from_user.id, "<b>❌📞Диалог c администратором завершен...</b>", reply_markup=keyboard.start_m)
+    await bot.answer_callback_query(callback_query.id)
+
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)

@@ -27,3 +27,17 @@ settings = types.InlineKeyboardMarkup(row_width=2)
 name = types.InlineKeyboardButton('🛠Поменять имя', callback_data='сh_name')
 number = types.InlineKeyboardButton('🛠Поменять номер', callback_data='сh_num')
 settings.add(name, number, app_btn3)
+
+call_m = types.InlineKeyboardMarkup(row_width=1)
+call1 = types.InlineKeyboardButton('📞Перезвоните мне', callback_data='call_back')
+call2 = types.InlineKeyboardButton('📞Свяжитесь со мной в чат-боте', callback_data='chat')
+call_m.add(call1, call2, app_btn3)
+
+call_b = types.InlineKeyboardMarkup()
+yes_button = types.InlineKeyboardButton('✅Дa', callback_data='confirm_number')
+leave_num = types.InlineKeyboardButton('🔙Оставить номер телефона', callback_data='leave-num')
+call_b.add(yes_button, leave_num)
+
+finish = types.InlineKeyboardMarkup()
+end_dialog_btn = types.InlineKeyboardButton('❌📞Завершить диалог', callback_data='end_dialog')
+finish.add(end_dialog_btn)

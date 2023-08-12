@@ -14,6 +14,11 @@ class Application(StatesGroup):
     Suggestion_ph = State()
 
 
+class Contact(StatesGroup):
+    Number = State()
+    Text = State()
+
+
 class Update(StatesGroup):
     Name = State()
     Phnum = State()
