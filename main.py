@@ -62,11 +62,11 @@ async def addphnum(message: types.Message, state: FSMContext):
     if re.match(r'^\+7\d{10}$', phnum):
         await state.update_data(phnum=phnum)
         data = await state.get_data()
-        db.update_user(message.chat.id, name=data['name'], phnum=data['phnum'])
+        db.add_user(message.chat.id, first_name=message.from_user.first_name, username=message.from_user.username, name=data['name'], phnum=data['phnum'])
 
         await state.finish()
 
-        await message.answer('✅ Ваши данные сохранены и обновлены в базе данных.')
+        await message.answer('✅ Ваши данные сохранены в базе данных.', reply_markup=keyboard.start_m)
     else:
         await message.answer('⚠️ Неправильный формат номера телефона. Введите номер в формате +7XXXXXXXXXX.')
 
